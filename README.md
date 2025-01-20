@@ -1,1 +1,1 @@
-# raspberry_tflite
+# Справочное приложение для запуска TensorFlow Lite на Raspberry
