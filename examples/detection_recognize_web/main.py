@@ -1,14 +1,12 @@
 import os
 import io
 import cv2
-import time
 import numpy as np
 import logging
 import socketserver
-from PIL import Image, ImageDraw, ImageFont
 from threading import Condition
 from http import server
-from picamera2 import MappedArray, Picamera2, Preview
+from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
 from tflite_runtime.interpreter import Interpreter
@@ -17,13 +15,16 @@ from tflite_runtime.interpreter import Interpreter
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Размеры изображений для работы с камерой
-NORMAL_SIZE = (640, 480)
-LOWRES_SIZE = (320, 240)
+NORMAL_SIZE = (640, 480)  # Основное разрешение
+LOWRES_SIZE = (320, 240)  # Разрешение для инференса
 rectangles = []  # Хранилище прямоугольников для отображения
 
 # Загрузка HTML-шаблона из файла
 def load_html_template(filename):
-    filepath = os.path.join(BASE_DIR, filename)
+    """
+    Читает HTML-шаблон для веб-страницы
+    """
+    filepath = os.path.join(BASE_DIR, "template", filename)
     try:
         with open(filepath, 'r', encoding='utf-8') as file:
             return file.read()
@@ -32,35 +33,36 @@ def load_html_template(filename):
         return "<html><body><h1>Error: Template not found.</h1></body></html>"
 
 # Инициализация HTML-шаблона
-HTML_TEMPLATE = load_html_template(os.path.join("template", "index.html"))
+HTML_TEMPLATE = load_html_template("index.html")
 
 # Функция для чтения файла с метками объектов
 def read_label_file(file_path):
-    """Читает файл с метками и возвращает словарь {id: label}"""
+    """
+    Читает файл с метками и возвращает словарь {id: label}
+    """
     with open(file_path, 'r') as f:
         lines = f.readlines()
     return {int(line.split(maxsplit=1)[0]): line.split(maxsplit=1)[1].strip() for line in lines}
 
 # Функция для отрисовки прямоугольников вокруг обнаруженных объектов
-def draw_rectangles(request):
+def draw_rectangles(image):
     """
-    Рисует прямоугольники на изображении с камерой
+    Рисует прямоугольники и метки объектов на изображении
     """
-    with MappedArray(request, "main") as m:
-        for rect in rectangles:
-            rect_start = (int(rect[0] * 2) - 5, int(rect[1] * 2) - 5)
-            rect_end = (int(rect[2] * 2) + 5, int(rect[3] * 2) + 5)
-            cv2.rectangle(m.array, rect_start, rect_end, (0, 255, 0, 0))  # Зеленый прямоугольник
-            if len(rect) == 5:
-                text = rect[4]
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(m.array, text, (rect_start[0] + 10, rect_start[1] + 10),
-                            font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+    for rect in rectangles:
+        rect_start = (int(rect[0] * 2) - 5, int(rect[1] * 2) - 5)
+        rect_end = (int(rect[2] * 2) + 5, int(rect[3] * 2) + 5)
+        cv2.rectangle(image, rect_start, rect_end, (0, 255, 0), 2)  # Зеленый прямоугольник
+        if len(rect) == 5:
+            text = rect[4]
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(image, text, (rect_start[0] + 10, rect_start[1] + 10),
+                        font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
 # Функция для выполнения инференса с использованием TensorFlow Lite
 def inference_tensorflow(image, model_path, label_path=None):
     """
-    Обрабатывает изображение и выполняет инференс
+    Выполняет инференс для входного изображения
     """
     global rectangles
 
@@ -73,9 +75,11 @@ def inference_tensorflow(image, model_path, label_path=None):
     input_shape = input_details[0]['shape']
     input_dtype = input_details[0]['dtype']
 
+    # Преобразование изображения
     rgb_image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
     resized_image = cv2.resize(rgb_image, (input_shape[2], input_shape[1]))
 
+    # Нормализация данных
     if input_dtype == np.float32:
         input_data = (resized_image.astype(np.float32) - 127.5) / 127.5
     elif input_dtype == np.uint8:
@@ -87,6 +91,7 @@ def inference_tensorflow(image, model_path, label_path=None):
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
 
+    # Получение результатов инференса
     detected_boxes = interpreter.get_tensor(output_details[0]['index'])
     detected_classes = interpreter.get_tensor(output_details[1]['index'])
     detected_scores = interpreter.get_tensor(output_details[2]['index'])
@@ -94,7 +99,7 @@ def inference_tensorflow(image, model_path, label_path=None):
 
     rectangles = []
     for i in range(num_boxes):
-        if detected_scores[0][i] > 0.5:
+        if detected_scores[0][i] > 0.5:  # Порог достоверности
             top, left, bottom, right = detected_boxes[0][i]
             box = [left * LOWRES_SIZE[0], bottom * LOWRES_SIZE[1],
                    right * LOWRES_SIZE[0], top * LOWRES_SIZE[1]]
@@ -103,6 +108,9 @@ def inference_tensorflow(image, model_path, label_path=None):
             rectangles.append(box)
 
 class StreamingOutput(io.BufferedIOBase):
+    """
+    Хранилище для кадров MJPEG-потока
+    """
     def __init__(self):
         self.frame = None
         self.condition = Condition()
@@ -113,6 +121,9 @@ class StreamingOutput(io.BufferedIOBase):
             self.condition.notify_all()
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
+    """
+    Обработчик HTTP-запросов для стриминга MJPEG
+    """
     def do_GET(self):
         if self.path == '/':
             self.send_response(301)
@@ -145,13 +156,13 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                         logging.warning("Failed to decode frame")
                         continue
 
+                    # Выполняем инференс и отрисовываем прямоугольники
                     gray_image = cv2.cvtColor(frame_image, cv2.COLOR_BGR2GRAY)
                     resized_image = cv2.resize(gray_image, (NORMAL_SIZE[0], NORMAL_SIZE[1]), interpolation=cv2.INTER_AREA)
                     inference_tensorflow(resized_image, model_path, label_path)
+                    draw_rectangles(frame_image)
 
-                    with MappedArray(frame_image, "main") as m:
-                        draw_rectangles(m)
-
+                    # Кодируем изображение в JPEG для стриминга
                     _, jpeg_frame = cv2.imencode('.jpg', frame_image)
 
                     self.wfile.write(b'--FRAME\r\n')
@@ -160,8 +171,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(jpeg_frame.tobytes())
                     self.wfile.write(b'\r\n')
+            except (BrokenPipeError, ConnectionResetError):
+                logging.warning(f"Removed streaming client {self.client_address}: Client disconnected.")
             except Exception as e:
-                logging.warning('Removed streaming client %s: %s', self.client_address, str(e))
+                logging.error(f"Error streaming to client {self.client_address}: {e}")
         elif self.path == '/favicon.ico':
             self.send_response(204)
             self.end_headers()
@@ -170,14 +183,17 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.end_headers()
 
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
+    """
+    Сервер с поддержкой многопоточной обработки запросов
+    """
     allow_reuse_address = True
     daemon_threads = True
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    model_path = os.path.join(BASE_DIR, "data", "mobilenet_v2.tflite")
-    label_path = os.path.join(BASE_DIR, "data", "coco_labels.txt")
+    model_path = os.path.join(BASE_DIR, "data", "mobilenet_v2.tflite")  # Путь к модели
+    label_path = os.path.join(BASE_DIR, "data", "coco_labels.txt")  # Путь к файлу меток
 
     picam2 = Picamera2()
     picam2.configure(picam2.create_video_configuration(main={"size": NORMAL_SIZE}))

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Picamera2 MJPEG Streaming</title>
+    <script>
+        function takeSnapshot() {
+            fetch('/snapshot')
+                .then(response => {
+                    if (response.ok) {
+                        alert('Snapshot saved!');
+                    } else {
+                        alert('Failed to save snapshot.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error while saving snapshot.');
+                });
+        }
+    </script>
+</head>
+<body>
+    <h1>Picamera2 MJPEG Streaming Demo</h1>
+    <img src="stream.mjpg" width="640" height="480" />
+    <br>
+    <button onclick="takeSnapshot()">Take Snapshot</button>
+</body>
+</html>

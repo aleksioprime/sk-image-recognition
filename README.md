@@ -191,6 +191,15 @@ cd raspberry_examples-main
 ```
 
 ```
+python examples/camera/main.py --headless
+python examples/camera_web/main.py
+python examples/recognize/main.py --headless
+python examples/recognize_web/main.py
+python examples/detection_recognize/main.py --headless
+python examples/detection_recognize_web/main.py
+```
+
+```
 python examples/camera/hello.py
 ```
 

@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Загрузка HTML-шаблона из файла
 def load_html_template(filename):
-    filepath = os.path.join(BASE_DIR, filename)
+    filepath = os.path.join(BASE_DIR, "template", filename)
     try:
         with open(filepath, 'r', encoding='utf-8') as file:
             return file.read()
@@ -27,7 +27,7 @@ def load_html_template(filename):
         return "<html><body><h1>Error: Template not found.</h1></body></html>"
 
 # Инициализация HTML-шаблона
-HTML_TEMPLATE = load_html_template(os.path.join("template", "index.html"))
+HTML_TEMPLATE = load_html_template("index.html")
 
 # Функции для классификации изображений
 def set_input_tensor(interpreter, image):
@@ -136,6 +136,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(jpeg_frame.tobytes())
                     self.wfile.write(b'\r\n')
+            except (BrokenPipeError, ConnectionResetError):
+                logging.warning(f"Removed streaming client {self.client_address}: Client disconnected.")
             except Exception as e:
                 logging.warning('Removed streaming client %s: %s', self.client_address, str(e))
         elif self.path == '/favicon.ico':

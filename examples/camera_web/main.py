@@ -7,13 +7,14 @@ from threading import Condition
 from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
+from datetime import datetime
 
 # Определение пути к текущей папке
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Загрузка HTML-шаблона из файла
 def load_html_template(filename):
-    filepath = os.path.join(BASE_DIR, filename)
+    filepath = os.path.join(BASE_DIR, "template", filename)
     try:
         with open(filepath, 'r', encoding='utf-8') as file:
             return file.read()
@@ -71,8 +72,27 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(frame)
                     self.wfile.write(b'\r\n')
+            except (BrokenPipeError, ConnectionResetError):
+                logging.warning(f"Removed streaming client {self.client_address}: Client disconnected.")
             except Exception as e:
                 logging.warning('Removed streaming client %s: %s', self.client_address, str(e))
+        elif self.path == '/snapshot':
+            # Захват стоп-кадра
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"snapshot_{timestamp}.jpg"
+                filepath = os.path.join(BASE_DIR, "snapshots", filename)
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                picam2.capture_file(filepath)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"Snapshot saved.")
+                logging.info(f"Snapshot saved to {filepath}")
+            except Exception as e:
+                logging.error(f"Error capturing snapshot: {e}")
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(b"Failed to save snapshot.")
         else:
             # 404: Страница не найдена
             self.send_error(404)
