@@ -1,5 +1,0 @@
-tflite-runtime==2.14.0
-numpy==2.2.2
-picamera==1.13
-picamera2==0.3.24
-pillow==11.1.0

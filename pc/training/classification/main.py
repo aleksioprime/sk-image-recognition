@@ -1,11 +1,12 @@
 import os
 import time
 import numpy as np
+import csv
 import matplotlib.pyplot as plt
 import cv2
 from tensorflow.keras.preprocessing.image import img_to_array, ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras import layers, models
 from tensorflow import lite
 from sklearn.metrics import classification_report
@@ -17,12 +18,13 @@ from imutils import paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_PATH = os.path.join(BASE_DIR, "dataset")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+CLASSES_CSV_PATH = os.path.join(OUTPUT_DIR, "labels.csv")
 PLOT_PATH = os.path.join(OUTPUT_DIR, "plot.png")
-WEIGHTS_PATH = os.path.join(OUTPUT_DIR, "weights.h5")
-TFLITE_PATH = os.path.join(OUTPUT_DIR, "weights.tflite")
+WEIGHTS_PATH = os.path.join(OUTPUT_DIR, "model.h5")
+TFLITE_PATH = os.path.join(OUTPUT_DIR, "model.tflite")
 
 WIDTH, HEIGHT = 64, 64
-EPOCHS = 30
+EPOCHS = 50
 BATCH_SIZE = 32
 
 # Убедимся, что папка для вывода существует
@@ -31,17 +33,13 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # Построение модели
 def build_model(width, height, depth, classes):
     model = models.Sequential([
-        layers.Conv2D(8, (5, 5), padding="same", input_shape=(height, width, depth)),
+        layers.Input(shape=(height, width, depth)),
+        layers.Conv2D(8, (5, 5), padding="same"),
         layers.Activation("relu"),
         layers.BatchNormalization(axis=-1),
         layers.MaxPooling2D(pool_size=(2, 2)),
 
         layers.Conv2D(16, (3, 3), padding="same"),
-        layers.Activation("relu"),
-        layers.BatchNormalization(axis=-1),
-        layers.MaxPooling2D(pool_size=(2, 2)),
-
-        layers.Conv2D(32, (3, 3), padding="same"),
         layers.Activation("relu"),
         layers.BatchNormalization(axis=-1),
         layers.MaxPooling2D(pool_size=(2, 2)),
@@ -76,13 +74,14 @@ def load_dataset(dataset_path, width, height, verbose=500):
     return np.array(data), np.array(labels)
 
 # Сохранение графиков обучения
-def save_plot(history, epochs, output_path):
+def save_plot(history, output_path):
+    epochs_range = range(len(history.history["loss"]))  # Используем реальное количество эпох
     plt.style.use("ggplot")
     plt.figure()
-    plt.plot(np.arange(0, epochs), history.history["loss"], label="train_loss")
-    plt.plot(np.arange(0, epochs), history.history["val_loss"], label="val_loss")
-    plt.plot(np.arange(0, epochs), history.history["accuracy"], label="train_acc")
-    plt.plot(np.arange(0, epochs), history.history["val_accuracy"], label="val_acc")
+    plt.plot(epochs_range, history.history["loss"], label="train_loss")
+    plt.plot(epochs_range, history.history["val_loss"], label="val_loss")
+    plt.plot(epochs_range, history.history["accuracy"], label="train_acc")
+    plt.plot(epochs_range, history.history["val_accuracy"], label="val_acc")
     plt.title("Training Loss and Accuracy")
     plt.xlabel("Epoch #")
     plt.ylabel("Loss/Accuracy")
@@ -99,6 +98,17 @@ def convert_to_tflite(model, tflite_path):
     with open(tflite_path, 'wb') as f:
         f.write(tflite_model)
     print(f"[INFO] TFLite model saved to {tflite_path}")
+
+# Функция для сохранения классов в CSV
+def save_classes_to_csv(classes, output_path):
+    """
+    Сохраняет классы в CSV файл
+    """
+    with open(output_path, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        for idx, class_name in enumerate(classes):
+            writer.writerow([idx, class_name])
+    print(f"[INFO] Classes saved to {output_path}")
 
 # Основная функция
 def main():
@@ -120,9 +130,12 @@ def main():
     num_classes = len(lb.classes_)
     print(f"[INFO] Number of classes: {num_classes}")
 
+     # Сохранение классов в CSV
+    save_classes_to_csv(lb.classes_, CLASSES_CSV_PATH)
+
     # Сборка и компиляция модели
     model = build_model(WIDTH, HEIGHT, 3, num_classes)
-    model.compile(optimizer=Adam(learning_rate=0.01, decay=0.01 / EPOCHS),
+    model.compile(optimizer=Adam(learning_rate=0.0001),
                   loss="categorical_crossentropy", metrics=["accuracy"])
     print(model.summary())
 
@@ -134,19 +147,22 @@ def main():
 
     # Обучение модели
     print("[INFO] Training model...")
+    # early_stopping = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
     start_time = time.time()
     history = model.fit(aug.flow(trainX, trainY, batch_size=BATCH_SIZE),
                         validation_data=(testX, testY),
-                        epochs=EPOCHS, callbacks=[checkpoint], verbose=1)
+                        epochs=EPOCHS,
+                        callbacks=[checkpoint],
+                        verbose=1)
     print(f"[INFO] Training completed in {time.time() - start_time:.2f} seconds")
 
     # Оценка модели
     print("[INFO] Evaluating model...")
     predictions = model.predict(testX, batch_size=BATCH_SIZE)
-    print(classification_report(testY.argmax(axis=1), predictions.argmax(axis=1), target_names=lb.classes_))
+    print(classification_report(testY.argmax(axis=1), predictions.argmax(axis=1), target_names=lb.classes_, zero_division=0))
 
     # Сохранение графика обучения
-    save_plot(history, EPOCHS, PLOT_PATH)
+    save_plot(history, PLOT_PATH)
 
     # Конвертация модели в TFLite
     convert_to_tflite(model, TFLITE_PATH)
