@@ -197,6 +197,8 @@ python examples/recognize/main.py --headless
 python examples/recognize_web/main.py
 python examples/detection_recognize/main.py --headless
 python examples/detection_recognize_web/main.py
+
+python examples/dataset_create/main.py
 ```
 
 ```

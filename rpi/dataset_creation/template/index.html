@@ -1,0 +1,116 @@
+<html>
+<head>
+    <title>Picamera2 Dataset Collection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        form {
+            margin: 20px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        img {
+            border: 2px solid #ccc;
+            margin: 10px 0;
+        }
+        .recording-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: red;
+            font-size: 24px;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Picamera2 Dataset Collection</h1>
+    <img src="stream.mjpg" width="480" alt="Live Stream" />
+
+    <form id="recordingForm">
+        <label for="class_name">Class Name:</label>
+        <input type="text" id="class_name" name="class_name" placeholder="Enter class name" required />
+        <br />
+        <label for="interval">Interval (seconds):</label>
+        <input type="number" id="interval" name="interval" value="2" min="0.1" step="0.1" required />
+        <br />
+        <label for="frame_count">Frame Count:</label>
+        <input type="number" id="frame_count" name="frame_count" value="10" min="1" required />
+        <br />
+        <button type="button" id="startButton" onclick="startRecording()">Start Recording</button>
+        <button type="button" id="stopButton" onclick="stopRecording()" disabled>Stop Recording</button>
+    </form>
+
+    <div id="recordingIndicator" style="display:none" class="recording-overlay">
+        Recording... <span id="frameCount">0</span> frames captured
+    </div>
+
+    <script>
+        function startRecording() {
+            const className = document.getElementById('class_name').value;
+            const interval = document.getElementById('interval').value;
+            const frameCount = document.getElementById('frame_count').value;
+
+            fetch('/start_recording', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `class_name=${encodeURIComponent(className)}&interval=${encodeURIComponent(interval)}&frame_count=${encodeURIComponent(frameCount)}`
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('startButton').disabled = true;
+                document.getElementById('stopButton').disabled = false;
+                document.getElementById('recordingIndicator').style.display = 'block';
+                document.getElementById('frameCount').textContent = 0; // Сбрасываем счетчик
+                checkStatus(); // Начинаем проверку состояния записи
+            })
+            .catch(error => alert('Error: ' + error));
+        }
+
+        function stopRecording() {
+            fetch('/stop_recording', {
+                method: 'POST'
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('startButton').disabled = false;
+                document.getElementById('stopButton').disabled = true;
+                document.getElementById('recordingIndicator').style.display = 'none';
+            })
+            .catch(error => alert('Error: ' + error));
+        }
+
+        function checkStatus() {
+            fetch('/check_status', {
+                method: 'GET'
+            })
+            .then(response => response.json())
+            .then(status => {
+                if (status.is_recording) {
+                    // Обновляем количество кадров в надписи
+                    document.getElementById('frameCount').textContent = status.captured_frames;
+                    setTimeout(checkStatus, 1000); // Повторная проверка через 1 секунду
+                } else {
+                    // Остановка записи
+                    alert(`Recording completed: ${status.captured_frames}/${status.total_frames} frames captured.`);
+                    document.getElementById('startButton').disabled = false;
+                    document.getElementById('stopButton').disabled = true;
+                    document.getElementById('recordingIndicator').style.display = 'none';
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+</html>
