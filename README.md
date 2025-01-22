@@ -143,7 +143,7 @@ sudo apt install python3-venv
 
 Создайте виртуальное окружение:
 ```
-python -m venv venv
+python -m venv --system-site-packages venv
 ```
 
 Запустите виртуальное окружение
@@ -173,7 +173,7 @@ ssh <имя пользователя>@<адрес хоста>
 ```
 Затем подтвердите подкючение и введите пароль от пользователя
 
-Выберите папку проекта и дождитесь установки VSCode Remote Server и расширения Python
+Выберите папку проекта и дождитесь установки VSCode Server и расширения Python
 
 Можете посмотреть конфигурацию подключения (значок шестерёнки):
 ```
@@ -185,7 +185,13 @@ Host 192.168.2.107
 ## Запуск тестовых программ
 
 ```
-wget https://github.com/username/repository/archive/refs/heads/main.zip
+wget https://github.com/aleksioprime/raspberry_examples/archive/refs/heads/main.zip
+unzip main.zip
+cd raspberry_examples-main
+```
+
+```
+python examples/camera/hello.py
 ```
 
 ## Полезные команды
