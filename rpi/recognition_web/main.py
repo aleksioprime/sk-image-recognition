@@ -5,7 +5,7 @@ import time
 import logging
 import socketserver
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from threading import Condition
 from http import server
 from picamera2 import Picamera2
@@ -112,13 +112,14 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                         logging.warning("Failed to decode frame")
                         continue
 
-                    # Классификация изображения
-                    gray_image = cv2.cvtColor(frame_image, cv2.COLOR_BGR2GRAY)
-                    resized_image = cv2.resize(gray_image, (width, height), interpolation=cv2.INTER_AREA)
-                    image_np = np.expand_dims(resized_image, axis=-1)
+                    # Обработка изображения
+                    rgb_image = cv2.cvtColor(frame_image, cv2.COLOR_BGR2RGB)
+                    processed_image = cv2.resize(rgb_image, (width, height), interpolation=cv2.INTER_AREA)
+                    processed_image = (processed_image.astype(np.float32) / 127.5) - 1
 
+                    # Классификация изображения и замер времени операции
                     start_time = time.time()
-                    results = classify_image(interpreter, image_np)
+                    results = classify_image(interpreter, processed_image)
                     elapsed_ms = (time.time() - start_time) * 1000
 
                     label_id, prob = results[0]

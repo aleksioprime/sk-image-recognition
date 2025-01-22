@@ -1,12 +1,15 @@
 import os
 import time
+import argparse
 import numpy as np
 import csv
 import matplotlib.pyplot as plt
 import cv2
-from tensorflow.keras.preprocessing.image import img_to_array, ImageDataGenerator
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.applications import MobileNetV2, ResNet50, VGG16
+from tensorflow.keras.models import load_model
 from tensorflow.keras import layers, models
 from tensorflow import lite
 from sklearn.metrics import classification_report
@@ -20,38 +23,39 @@ DATASET_PATH = os.path.join(BASE_DIR, "dataset")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 CLASSES_CSV_PATH = os.path.join(OUTPUT_DIR, "labels.csv")
 PLOT_PATH = os.path.join(OUTPUT_DIR, "plot.png")
-WEIGHTS_PATH = os.path.join(OUTPUT_DIR, "model.h5")
+DEFAULT_WEIGHTS_PATH = os.path.join(OUTPUT_DIR, "model.h5")
 TFLITE_PATH = os.path.join(OUTPUT_DIR, "model.tflite")
 
-WIDTH, HEIGHT = 64, 64
+WIDTH, HEIGHT = 128, 128
 EPOCHS = 50
 BATCH_SIZE = 32
 
 # Убедимся, что папка для вывода существует
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Построение модели
-def build_model(width, height, depth, classes):
+# Функция загрузки предобученной модели
+def load_pretrained_model(base_model_name_or_path, input_shape, num_classes):
+    if os.path.isfile(base_model_name_or_path):
+        print(f"[INFO] Loading model from file: {base_model_name_or_path}")
+        return load_model(base_model_name_or_path)
+
+    print(f"[INFO] Loading pretrained model: {base_model_name_or_path}")
+
+    if base_model_name_or_path == "MobileNetV2":
+        base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=input_shape)
+    elif base_model_name_or_path == "ResNet50":
+        base_model = ResNet50(weights="imagenet", include_top=False, input_shape=input_shape)
+    elif base_model_name_or_path == "VGG16":
+        base_model = VGG16(weights="imagenet", include_top=False, input_shape=input_shape)
+    else:
+        raise ValueError(f"Unknown model name or path: {base_model_name_or_path}")
+
     model = models.Sequential([
-        layers.Input(shape=(height, width, depth)),
-        layers.Conv2D(8, (5, 5), padding="same"),
-        layers.Activation("relu"),
-        layers.BatchNormalization(axis=-1),
-        layers.MaxPooling2D(pool_size=(2, 2)),
-
-        layers.Conv2D(16, (3, 3), padding="same"),
-        layers.Activation("relu"),
-        layers.BatchNormalization(axis=-1),
-        layers.MaxPooling2D(pool_size=(2, 2)),
-
-        layers.Flatten(),
-        layers.Dense(128),
-        layers.Activation("relu"),
-        layers.BatchNormalization(),
+        base_model,
+        layers.GlobalAveragePooling2D(),
+        layers.Dense(128, activation="relu"),
         layers.Dropout(0.5),
-
-        layers.Dense(classes),
-        layers.Activation("softmax")
+        layers.Dense(num_classes, activation="softmax")
     ])
     return model
 
@@ -63,9 +67,11 @@ def load_dataset(dataset_path, width, height, verbose=500):
     for i, image_path in enumerate(image_paths):
         image = cv2.imread(image_path)
         label = image_path.split(os.path.sep)[-2]
-        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
-        image_array = img_to_array(image)
-        data.append(image_array)
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        resized_image = cv2.resize(rgb_image, (width, height), interpolation=cv2.INTER_AREA)
+        normalized_image = resized_image.astype(np.float32) / 255.0
+
+        data.append(normalized_image)
         labels.append(label)
 
         if verbose > 0 and i > 0 and (i + 1) % verbose == 0:
@@ -75,7 +81,7 @@ def load_dataset(dataset_path, width, height, verbose=500):
 
 # Сохранение графиков обучения
 def save_plot(history, output_path):
-    epochs_range = range(len(history.history["loss"]))  # Используем реальное количество эпох
+    epochs_range = range(len(history.history["loss"]))
     plt.style.use("ggplot")
     plt.figure()
     plt.plot(epochs_range, history.history["loss"], label="train_loss")
@@ -88,41 +94,36 @@ def save_plot(history, output_path):
     plt.legend()
     plt.savefig(output_path)
 
-# Конвертация модели в TFLite
-def convert_to_tflite(model, tflite_path):
-    print("[INFO] Converting model to TFLite...")
-    converter = lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [lite.Optimize.DEFAULT]
-    tflite_model = converter.convert()
-
-    with open(tflite_path, 'wb') as f:
-        f.write(tflite_model)
-    print(f"[INFO] TFLite model saved to {tflite_path}")
-
-# Функция для сохранения классов в CSV
+# Сохранение классов в CSV
 def save_classes_to_csv(classes, output_path):
-    """
-    Сохраняет классы в CSV файл
-    """
     with open(output_path, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         for idx, class_name in enumerate(classes):
             writer.writerow([idx, class_name])
     print(f"[INFO] Classes saved to {output_path}")
 
+# Конвертация модели в TFLite
+def convert_to_tflite(model, tflite_path):
+    print("[INFO] Converting model to TFLite...")
+    converter = lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+
+    with open(tflite_path, 'wb') as f:
+        f.write(tflite_model)
+    print(f"[INFO] TFLite model saved to {tflite_path}")
+
 # Основная функция
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default=None, help="Pretrained model name or path to model file")
+    parser.add_argument("--weights", type=str, default=DEFAULT_WEIGHTS_PATH, help="Path to save/load model weights")
+    args = parser.parse_args()
+
     print("[INFO] Loading dataset...")
     data, labels = load_dataset(DATASET_PATH, WIDTH, HEIGHT)
-    data = data.astype("float") / 255.0
 
-    # Разделение данных на тренировочную и тестовую выборки
     trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.25, random_state=42)
 
-    print(f"[INFO] Dataset shape: {data.shape}")
-    print(f"[INFO] Dataset size: {data.nbytes / (1024 * 1024):.2f} MB")
-
-    # Преобразование меток в one-hot векторы
     lb = LabelBinarizer()
     trainY = lb.fit_transform(trainY)
     testY = lb.transform(testY)
@@ -130,24 +131,34 @@ def main():
     num_classes = len(lb.classes_)
     print(f"[INFO] Number of classes: {num_classes}")
 
-     # Сохранение классов в CSV
     save_classes_to_csv(lb.classes_, CLASSES_CSV_PATH)
 
-    # Сборка и компиляция модели
-    model = build_model(WIDTH, HEIGHT, 3, num_classes)
-    model.compile(optimizer=Adam(learning_rate=0.0001),
+    input_shape = (HEIGHT, WIDTH, 3)
+
+    if args.model:
+        model = load_pretrained_model(args.model, input_shape, num_classes)
+    else:
+        print("[INFO] No pretrained model specified. Using custom architecture.")
+        model = models.Sequential([
+            layers.Input(shape=input_shape),
+            layers.Conv2D(32, (3, 3), activation="relu", padding="same"),
+            layers.MaxPooling2D((2, 2)),
+            layers.Flatten(),
+            layers.Dense(128, activation="relu"),
+            layers.Dropout(0.5),
+            layers.Dense(num_classes, activation="softmax")
+        ])
+
+    model.compile(optimizer=Adam(learning_rate=0.001),
                   loss="categorical_crossentropy", metrics=["accuracy"])
     print(model.summary())
 
-    # Настройка генератора данных и обратного вызова
-    aug = ImageDataGenerator(rotation_range=20, zoom_range=0.15,
-                             width_shift_range=0.2, height_shift_range=0.2,
-                             shear_range=0.15, horizontal_flip=True, fill_mode="nearest")
-    checkpoint = ModelCheckpoint(WEIGHTS_PATH, monitor="val_loss", save_best_only=True, verbose=1)
+    aug = ImageDataGenerator(rotation_range=20, zoom_range=0.15, width_shift_range=0.2,
+                             height_shift_range=0.2, shear_range=0.15, horizontal_flip=True, fill_mode="nearest")
 
-    # Обучение модели
+    checkpoint = ModelCheckpoint(args.weights, monitor="val_loss", save_best_only=True, verbose=1)
+
     print("[INFO] Training model...")
-    # early_stopping = EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
     start_time = time.time()
     history = model.fit(aug.flow(trainX, trainY, batch_size=BATCH_SIZE),
                         validation_data=(testX, testY),
@@ -156,15 +167,14 @@ def main():
                         verbose=1)
     print(f"[INFO] Training completed in {time.time() - start_time:.2f} seconds")
 
-    # Оценка модели
     print("[INFO] Evaluating model...")
     predictions = model.predict(testX, batch_size=BATCH_SIZE)
-    print(classification_report(testY.argmax(axis=1), predictions.argmax(axis=1), target_names=lb.classes_, zero_division=0))
+    print(classification_report(testY.argmax(axis=1), predictions.argmax(axis=1),
+                                target_names=lb.classes_, zero_division=0))
 
-    # Сохранение графика обучения
     save_plot(history, PLOT_PATH)
 
-    # Конвертация модели в TFLite
+    # Конвертация и сохранение модели в TFLite
     convert_to_tflite(model, TFLITE_PATH)
 
 if __name__ == "__main__":

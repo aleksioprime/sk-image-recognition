@@ -44,7 +44,7 @@ def main():
     interpreter = Interpreter(model_path=os.path.join(BASE_DIR, "data", "model.tflite"))
 
     # Загрузка меток
-    labels = open(os.path.join(BASE_DIR, "data", "labels.txt")).read().strip().split("\n")
+    labels = open(os.path.join(BASE_DIR, "data", "labels.csv")).read().strip().split("\n")
     labels = [l.split(",")[1] for l in labels]
 
     interpreter.allocate_tensors()
@@ -62,11 +62,12 @@ def main():
             frame = picam2.capture_array()
 
             # Преобразование кадра для модели
-            image = Image.fromarray(frame).convert('L').resize((width, height), Image.LANCZOS)
-            image = np.expand_dims(np.array(image), axis=-1)
+            rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            processed_image = cv2.resize(rgb_image, (width, height), interpolation=cv2.INTER_AREA)
+            processed_image = (processed_image.astype(np.float32) / 127.5) - 1
 
             start_time = time.time()
-            results = classify_image(interpreter, image)
+            results = classify_image(interpreter, processed_image)
             elapsed_ms = (time.time() - start_time) * 1000
 
             label_id, prob = results[0]

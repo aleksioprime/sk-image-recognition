@@ -88,15 +88,14 @@ pip install wheel
 
 Установите необходимые библиотеки:
 ```
-pip install opencv-python
-pip install tensorflow
-pip install tflite-runtime
+pip install opencv-python==4.11.0.86
+pip install tensorflow==2.18.0
+pip install tflite-runtime==2.14.0
 ```
 
-Переустановите NumPy (если необходимо):
+Переустановите NumPy (для cameralib нужна версия < 2):
 ```
-pip uninstall numpy
-pip install numpy==1.26.4
+pip install --force-reinstall numpy==1.26.4
 ```
 
 ## Вариант установки библиотек без создания среды (не рекомендуется)

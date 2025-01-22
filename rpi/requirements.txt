@@ -4,3 +4,4 @@ picamera==1.13
 picamera2==0.3.24
 pillow==11.1.0
 opencv-python==4.11.0.86
+tensorflow==2.18.0
