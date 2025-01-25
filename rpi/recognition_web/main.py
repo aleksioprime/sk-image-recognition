@@ -11,7 +11,8 @@ from http import server
 from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
-import tensorflow.lite as tflite
+from tflite_runtime.interpreter import Interpreter
+# import tensorflow.lite as tflite
 
 # Определение пути к текущей папке
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -157,7 +158,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     # Инициализация модели
-    interpreter = tflite.Interpreter(model_path=os.path.join(BASE_DIR, "data", "model.tflite"))
+    interpreter = Interpreter(model_path=os.path.join(BASE_DIR, "data", "model.tflite"))
     labels = open(os.path.join(BASE_DIR, "data", "labels.csv")).read().strip().split("\n")
     labels = [l.split(",")[1] for l in labels]
 
