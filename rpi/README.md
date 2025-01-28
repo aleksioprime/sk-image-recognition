@@ -131,9 +131,9 @@ Host 192.168.2.107
 
 Скачайте текущий репозиторий
 ```
-wget https://github.com/aleksioprime/raspberry_examples/archive/refs/heads/main.zip
+wget https://github.com/aleksioprime/image_recognition_examples/archive/refs/heads/main.zip
 unzip main.zip
-cd raspberry_examples-main
+cd image_recognition_examples-main
 ```
 
 Запустите программу:
