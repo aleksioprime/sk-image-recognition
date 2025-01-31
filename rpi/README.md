@@ -80,7 +80,7 @@ deactivate
 rm -rf ~/venv
 ```
 
-Установите вспомогательных библиотек:
+Установите дополнительные зависимости:
 ```
 sudo apt install libcap-dev
 pip install wheel
@@ -89,8 +89,9 @@ pip install wheel
 Установите необходимые библиотеки:
 ```
 pip install opencv-python==4.11.0.86
-pip install tensorflow==2.18.0
 pip install tflite-runtime==2.14.0
+# Если необходимо
+pip install tensorflow==2.18.0
 ```
 
 Переустановите NumPy (для cameralib нужна версия < 2):

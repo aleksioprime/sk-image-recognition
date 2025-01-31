@@ -57,6 +57,7 @@ def load_pretrained_model(base_model_name_or_path, input_shape, num_classes):
         layers.Dropout(0.5),
         layers.Dense(num_classes, activation="softmax")
     ])
+
     return model
 
 # Загрузка и обработка датасета

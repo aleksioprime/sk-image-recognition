@@ -3,6 +3,8 @@ import os
 import cv2
 import time
 import logging
+import argparse
+import socket
 import socketserver
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -11,6 +13,7 @@ from http import server
 from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
+from libcamera import Transform
 from tflite_runtime.interpreter import Interpreter
 # import tensorflow.lite as tflite
 
@@ -154,8 +157,22 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+def get_local_ip():
+    """Определение локального IP-адреса"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description="MJPEG Streaming with PiCamera2")
+    parser.add_argument("--flip", choices=["none", "h", "v", "hv"], default="none",
+                        help="Set flip mode: 'none' (default), 'h' (horizontal), 'v' (vertical), 'hv' (both)")
+    args = parser.parse_args()
 
     # Инициализация модели
     interpreter = Interpreter(model_path=os.path.join(BASE_DIR, "data", "model.tflite"))
@@ -166,16 +183,19 @@ if __name__ == '__main__':
     _, height, width, _ = interpreter.get_input_details()[0]['shape']
     logging.info(f"Форма входного слоя модели: {width}x{height}")
 
+    transform = Transform(hflip="h" in args.flip, vflip="v" in args.flip)
+
     # Настройка камеры
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}))
+    picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}), transform=transform)
     output = StreamingOutput()
     picam2.start_recording(JpegEncoder(), FileOutput(output))
 
     try:
+        local_ip = get_local_ip()
         address = ('', 8000)
         server = StreamingServer(address, StreamingHandler)
-        logging.info("Server started on http://<your-ip>:8000")
+        logging.info(f"Server started on http://{local_ip}:8000")
         server.serve_forever()
     finally:
         picam2.stop_recording()

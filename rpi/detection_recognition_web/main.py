@@ -3,13 +3,17 @@ import io
 import cv2
 import numpy as np
 import logging
+import argparse
+import socket
 import socketserver
 from threading import Condition
 from http import server
 from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
+from libcamera import Transform
 from tflite_runtime.interpreter import Interpreter
+# import tensorflow.lite as tflite
 
 # Определение пути к текущей папке
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,8 +36,10 @@ def load_html_template(filename):
         logging.error(f"HTML template file '{filepath}' not found.")
         return "<html><body><h1>Error: Template not found.</h1></body></html>"
 
+
 # Инициализация HTML-шаблона
 HTML_TEMPLATE = load_html_template("index.html")
+
 
 # Функция для чтения файла с метками объектов
 def read_label_file(file_path):
@@ -43,6 +49,7 @@ def read_label_file(file_path):
     with open(file_path, 'r') as f:
         lines = f.readlines()
     return {int(line.split(maxsplit=1)[0]): line.split(maxsplit=1)[1].strip() for line in lines}
+
 
 # Функция для отрисовки прямоугольников вокруг обнаруженных объектов
 def draw_rectangles(image):
@@ -58,6 +65,7 @@ def draw_rectangles(image):
             font = cv2.FONT_HERSHEY_SIMPLEX
             cv2.putText(image, text, (rect_start[0] + 10, rect_start[1] + 10),
                         font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
 
 # Функция для выполнения инференса с использованием TensorFlow Lite
 def inference_tensorflow(image, model_path, label_path=None):
@@ -107,6 +115,7 @@ def inference_tensorflow(image, model_path, label_path=None):
                 box.append(labels[int(detected_classes[0][i])])
             rectangles.append(box)
 
+
 class StreamingOutput(io.BufferedIOBase):
     """
     Хранилище для кадров MJPEG-потока
@@ -119,6 +128,7 @@ class StreamingOutput(io.BufferedIOBase):
         with self.condition:
             self.frame = buf
             self.condition.notify_all()
+
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
     """
@@ -182,6 +192,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_error(404)
             self.end_headers()
 
+
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     """
     Сервер с поддержкой многопоточной обработки запросов
@@ -189,21 +200,41 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+
+def get_local_ip():
+    """Определение локального IP-адреса"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description="MJPEG Streaming with PiCamera2")
+    parser.add_argument("--flip", choices=["none", "h", "v", "hv"], default="none",
+                        help="Set flip mode: 'none' (default), 'h' (horizontal), 'v' (vertical), 'hv' (both)")
+    args = parser.parse_args()
+
 
     model_path = os.path.join(BASE_DIR, "data", "mobilenet_v2.tflite")  # Путь к модели
     label_path = os.path.join(BASE_DIR, "data", "coco_labels.txt")  # Путь к файлу меток
 
+    transform = Transform(hflip="h" in args.flip, vflip="v" in args.flip)
+
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": NORMAL_SIZE}))
+    picam2.configure(picam2.create_video_configuration(main={"size": NORMAL_SIZE}), transform=transform)
     output = StreamingOutput()
     picam2.start_recording(JpegEncoder(), FileOutput(output))
 
     try:
+        local_ip = get_local_ip()
         address = ('', 8000)
         server = StreamingServer(address, StreamingHandler)
-        logging.info("Server started on http://<your-ip>:8000")
+        logging.info(f"Server started on http://{local_ip}:8000")
         server.serve_forever()
     finally:
         picam2.stop_recording()
