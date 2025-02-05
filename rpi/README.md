@@ -14,6 +14,44 @@
 - SSID и пароль от точки доступа WiFi;
 - включите SSH во вкладке Службы.
 
+Если необходимо предусмотреть подключение к нескольким сетям, то в разделе boot создайте файл wpa_supplicant.conf в разделе boot:
+```
+country=RU
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+
+network={
+    ssid="SSID_NAME"
+    psk="YOUR_PASSWORD"
+    key_mgmt=WPA-PSK
+    priority=1
+}
+
+network={
+    ssid="ANOTHER_WIFI"
+    psk="ANOTHER_PASSWORD"
+    key_mgmt=WPA-PSK
+    priority=2
+}
+```
+
+Если необходимо заранее присвоить IP адрес устройству, то в разделе boot создайте файл dhcpcd.conf:
+```
+# Настройки для Wi-Fi (wlan0)
+interface wlan0
+static ip_address=192.168.1.100/24
+static routers=192.168.1.1
+static domain_name_servers=8.8.8.8 8.8.4.4
+
+# Настройки для Ethernet (eth0)
+interface eth0
+static ip_address=192.168.1.150/24
+static routers=192.168.1.1
+static domain_name_servers=8.8.8.8 8.8.4.4
+```
+
+### Настройка после первого запуска
+
 После установки узнайте IP-адрес платы (через роутер или подключение к дисплею по HDMI) и подключитесь к плате по SSH:
 ```
 ssh <имя пользователя>@<IP-адрес>
