@@ -33,20 +33,29 @@ def load_html_template(filename):
 # Инициализация HTML-шаблона
 HTML_TEMPLATE = load_html_template("index.html")
 
-# Функции для классификации изображений
 def set_input_tensor(interpreter, image):
+    """
+    Задает входное изображение для интерпретатора
+    """
     tensor_index = interpreter.get_input_details()[0]['index']
     input_tensor = interpreter.tensor(tensor_index)()[0]
     input_tensor[:, :] = image
 
 def classify_image(interpreter, image, top_k=1):
+    """
+    Выполняет классификацию изображения и возвращает топ-k результатов
+    """
     set_input_tensor(interpreter, image)
     interpreter.invoke()
     output_details = interpreter.get_output_details()[0]
     output = np.squeeze(interpreter.get_tensor(output_details['index']))
+
+    # Обработка квантованного вывода
     if output_details['dtype'] == np.uint8:
         scale, zero_point = output_details['quantization']
         output = scale * (output - zero_point)
+
+    # Сортировка по вероятности
     ordered = np.argpartition(-output, top_k)
     return [(i, output[i]) for i in ordered[:top_k]]
 
@@ -71,6 +80,30 @@ def draw_label_on_frame(frame, label, probability, inference_time):
     draw.text(text_position, text, font=font, fill=text_color)
 
     return np.array(image)
+
+def crop_center_square(image):
+    """
+    Обрезает изображение в квадрат с заданным размером и смещением от центра.
+    """
+    h, w, _ = image.shape
+    size = 400
+    offset_x = 0
+    offset_y = -40
+
+    center_x = w // 2 + offset_x
+    center_y = h // 2 + offset_y
+
+    x1 = max(0, center_x - size // 2)
+    y1 = max(0, center_y - size // 2)
+    x2 = min(w, x1 + size)
+    y2 = min(h, y1 + size)
+
+    if x2 - x1 < size:
+        x1 = max(0, x2 - size)
+    if y2 - y1 < size:
+        y1 = max(0, y2 - size)
+
+    return image[y1:y2, x1:x2]
 
 class StreamingOutput(io.BufferedIOBase):
     def __init__(self):
@@ -116,10 +149,14 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                         logging.warning("Failed to decode frame")
                         continue
 
+                    cropped_image = crop_center_square(frame_image)
+
                     # Обработка изображения
-                    rgb_image = cv2.cvtColor(frame_image, cv2.COLOR_BGR2RGB)
+                    rgb_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB)
                     processed_image = cv2.resize(rgb_image, (width, height), interpolation=cv2.INTER_AREA)
-                    processed_image = (processed_image.astype(np.float32) / 127.5) - 1
+                    # processed_image = (processed_image.astype(np.float32) / 127.5) - 1
+                    processed_image = processed_image.astype("float32") / 255.0  # Нормализация
+                    processed_image = np.expand_dims(processed_image, axis=0)  # Добавление размерности для модели
 
                     # Классификация изображения и замер времени операции
                     start_time = time.time()
@@ -130,7 +167,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     label = labels[label_id]
 
                     # Добавляем подписи на кадр
-                    annotated_frame = draw_label_on_frame(frame_image, label, prob, elapsed_ms)
+                    annotated_frame = draw_label_on_frame(cropped_image, label, prob, elapsed_ms)
 
                     # Кодируем обратно в JPEG для стрима
                     _, jpeg_frame = cv2.imencode('.jpg', annotated_frame)
@@ -187,7 +224,8 @@ if __name__ == '__main__':
 
     # Настройка камеры
     picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}), transform=transform)
+    config = picam2.create_video_configuration(main={"size": (640, 480)}, transform=transform)
+    picam2.configure(config)
     output = StreamingOutput()
     picam2.start_recording(JpegEncoder(), FileOutput(output))
 
